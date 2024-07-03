@@ -6,6 +6,9 @@ services:
     pull_policy: always
     tty: true
     restart: unless-stopped
+    environment:
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_KEEP_ALIVE=12h
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
 
   open-webui:
@@ -25,6 +28,7 @@ services:
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY='
+      - 'OPENWEATHER_API_KEY=4e2e4109c93a9ef746dfd9a86ec0d3a5'  # Jess's API key
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
