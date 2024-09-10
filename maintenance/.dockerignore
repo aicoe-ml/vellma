@@ -1,0 +1,7 @@
+*
+!requirements*
+!app/*
+!Dockerfile.*
+
+# Ignore __pycache__ directories no matter where they are located
+**/__pycache__/

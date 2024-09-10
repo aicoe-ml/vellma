@@ -1,0 +1,8 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.maintenance
+    container_name: vellma-maintenance
+    ports:
+      - ${OPEN_WEBUI_PORT-3000}:8080

@@ -1,17 +1,11 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
-	import { marked } from 'marked';
-	import tippy from 'tippy.js';
-	import auto_render from 'katex/dist/contrib/auto-render.mjs';
-	import 'katex/dist/katex.min.css';
-	import mermaid from 'mermaid';
 
-	import { fade } from 'svelte/transition';
 	import { createEventDispatcher } from 'svelte';
 	import { onMount, tick, getContext } from 'svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	const dispatch = createEventDispatcher();
 
@@ -20,27 +14,69 @@
 	import { imageGenerations } from '$lib/apis/images';
 	import {
 		approximateToHumanReadable,
-		extractSentences,
-		replaceTokens,
-		revertSanitizedResponseContent,
-		sanitizeResponseContent
+		extractParagraphsForAudio,
+		extractSentencesForAudio,
+		cleanText,
+		getMessageContentParts
 	} from '$lib/utils';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
 	import Skeleton from './Skeleton.svelte';
-	import CodeBlock from './CodeBlock.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import RateComment from './RateComment.svelte';
-	import CitationsModal from '$lib/components/chat/Messages/CitationsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
-	import MarkdownTokens from './MarkdownTokens.svelte';
+	import Markdown from './Markdown.svelte';
+	import Error from './Error.svelte';
+	import Citations from './Citations.svelte';
 
-	export let message;
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+
+	interface MessageType {
+		id: string;
+		model: string;
+		content: string;
+		files?: { type: string; url: string }[];
+		timestamp: number;
+		role: string;
+		statusHistory?: {
+			done: boolean;
+			action: string;
+			description: string;
+			urls?: string[];
+			query?: string;
+		}[];
+		status?: {
+			done: boolean;
+			action: string;
+			description: string;
+			urls?: string[];
+			query?: string;
+		};
+		done: boolean;
+		error?: boolean | { content: string };
+		citations?: string[];
+		info?: {
+			openai?: boolean;
+			prompt_tokens?: number;
+			completion_tokens?: number;
+			total_tokens?: number;
+			eval_count?: number;
+			eval_duration?: number;
+			prompt_eval_count?: number;
+			prompt_eval_duration?: number;
+			total_duration?: number;
+			load_duration?: number;
+		};
+		annotation?: { type: string; rating: number };
+	}
+
+	export let message: MessageType;
 	export let siblings;
 
 	export let isLastMessage = true;
@@ -63,133 +99,34 @@
 	let edit = false;
 	let editedContent = '';
 	let editTextAreaElement: HTMLTextAreaElement;
-	let tooltipInstance = null;
 
-	let sentencesAudio = {};
-	let speaking = null;
-	let speakingIdx = null;
+	let audioParts: Record<number, HTMLAudioElement | null> = {};
+	let speaking = false;
+	let speakingIdx: number | undefined;
 
 	let loadingSpeech = false;
 	let generatingImage = false;
 
 	let showRateComment = false;
-	let showCitationModal = false;
 
-	let selectedCitation = null;
-
-	let tokens;
-
-	$: (async () => {
-		if (message?.content) {
-			tokens = marked.lexer(
-				replaceTokens(sanitizeResponseContent(message?.content), model?.name, $user?.name)
-			);
-			// console.log(message?.content, tokens);
-		}
-	})();
-
-	$: if (message) {
-		renderStyling();
-	}
-
-	const renderStyling = async () => {
-		await tick();
-
-		if (tooltipInstance) {
-			tooltipInstance[0]?.destroy();
-		}
-
-		renderLatex();
-
-		if (message.info) {
-			let tooltipContent = '';
-			if (message.info.openai) {
-				tooltipContent = `prompt_tokens: ${message.info.prompt_tokens ?? 'N/A'}<br/>
-													completion_tokens: ${message.info.completion_tokens ?? 'N/A'}<br/>
-													total_tokens: ${message.info.total_tokens ?? 'N/A'}`;
-			} else {
-				tooltipContent = `response_token/s: ${
-					`${
-						Math.round(
-							((message.info.eval_count ?? 0) / (message.info.eval_duration / 1000000000)) * 100
-						) / 100
-					} tokens` ?? 'N/A'
-				}<br/>
-					prompt_token/s: ${
-						Math.round(
-							((message.info.prompt_eval_count ?? 0) /
-								(message.info.prompt_eval_duration / 1000000000)) *
-								100
-						) / 100 ?? 'N/A'
-					} tokens<br/>
-                    total_duration: ${
-											Math.round(((message.info.total_duration ?? 0) / 1000000) * 100) / 100 ??
-											'N/A'
-										}ms<br/>
-                    load_duration: ${
-											Math.round(((message.info.load_duration ?? 0) / 1000000) * 100) / 100 ?? 'N/A'
-										}ms<br/>
-                    prompt_eval_count: ${message.info.prompt_eval_count ?? 'N/A'}<br/>
-                    prompt_eval_duration: ${
-											Math.round(((message.info.prompt_eval_duration ?? 0) / 1000000) * 100) /
-												100 ?? 'N/A'
-										}ms<br/>
-                    eval_count: ${message.info.eval_count ?? 'N/A'}<br/>
-                    eval_duration: ${
-											Math.round(((message.info.eval_duration ?? 0) / 1000000) * 100) / 100 ?? 'N/A'
-										}ms<br/>
-                    approximate_total: ${approximateToHumanReadable(message.info.total_duration)}`;
-			}
-			tooltipInstance = tippy(`#info-${message.id}`, {
-				content: `<span class="text-xs" id="tooltip-${message.id}">${tooltipContent}</span>`,
-				allowHTML: true,
-				theme: 'dark',
-				arrow: false,
-				offset: [0, 4]
-			});
-		}
-	};
-
-	const renderLatex = () => {
-		let chatMessageElements = document
-			.getElementById(`message-${message.id}`)
-			?.getElementsByClassName('chat-assistant');
-
-		if (chatMessageElements) {
-			for (const element of chatMessageElements) {
-				auto_render(element, {
-					// customised options
-					// • auto-render specific keys, e.g.:
-					delimiters: [
-						{ left: '$$', right: '$$', display: false },
-						{ left: '$ ', right: ' $', display: false },
-						{ left: '\\pu{', right: '}', display: false },
-						{ left: '\\ce{', right: '}', display: false },
-						{ left: '\\(', right: '\\)', display: false },
-						{ left: '( ', right: ' )', display: false },
-						{ left: '\\[', right: '\\]', display: false },
-						{ left: '[ ', right: ' ]', display: false }
-					],
-					// • rendering keys, e.g.:
-					throwOnError: false
-				});
-			}
-		}
-	};
-
-	const playAudio = (idx) => {
-		return new Promise((res) => {
+	const playAudio = (idx: number) => {
+		return new Promise<void>((res) => {
 			speakingIdx = idx;
-			const audio = sentencesAudio[idx];
+			const audio = audioParts[idx];
+
+			if (!audio) {
+				return res();
+			}
+
 			audio.play();
-			audio.onended = async (e) => {
+			audio.onended = async () => {
 				await new Promise((r) => setTimeout(r, 300));
 
-				if (Object.keys(sentencesAudio).length - 1 === idx) {
-					speaking = null;
+				if (Object.keys(audioParts).length - 1 === idx) {
+					speaking = false;
 				}
 
-				res(e);
+				res();
 			};
 		});
 	};
@@ -199,113 +136,111 @@
 			try {
 				speechSynthesis.cancel();
 
-				sentencesAudio[speakingIdx].pause();
-				sentencesAudio[speakingIdx].currentTime = 0;
+				if (speakingIdx !== undefined && audioParts[speakingIdx]) {
+					audioParts[speakingIdx]!.pause();
+					audioParts[speakingIdx]!.currentTime = 0;
+				}
 			} catch {}
 
-			speaking = null;
-			speakingIdx = null;
-		} else {
-			if ((message?.content ?? '').trim() !== '') {
-				speaking = true;
+			speaking = false;
+			speakingIdx = undefined;
+			return;
+		}
 
-				if ($config.audio.tts.engine !== '') {
-					loadingSpeech = true;
+		if (!(message?.content ?? '').trim().length) {
+			toast.info($i18n.t('No content to speak'));
+			return;
+		}
 
-					const sentences = extractSentences(message.content).reduce((mergedTexts, currentText) => {
-						const lastIndex = mergedTexts.length - 1;
-						if (lastIndex >= 0) {
-							const previousText = mergedTexts[lastIndex];
-							const wordCount = previousText.split(/\s+/).length;
-							if (wordCount < 2) {
-								mergedTexts[lastIndex] = previousText + ' ' + currentText;
-							} else {
-								mergedTexts.push(currentText);
-							}
-						} else {
-							mergedTexts.push(currentText);
-						}
-						return mergedTexts;
-					}, []);
+		speaking = true;
 
-					console.log(sentences);
+		if ($config.audio.tts.engine !== '') {
+			loadingSpeech = true;
 
-					if (sentences.length > 0) {
-						sentencesAudio = sentences.reduce((a, e, i, arr) => {
-							a[i] = null;
-							return a;
-						}, {});
+			const messageContentParts: string[] = getMessageContentParts(
+				message.content,
+				$config?.audio?.tts?.split_on ?? 'punctuation'
+			);
 
-						let lastPlayedAudioPromise = Promise.resolve(); // Initialize a promise that resolves immediately
+			if (!messageContentParts.length) {
+				console.log('No content to speak');
+				toast.info($i18n.t('No content to speak'));
 
-						for (const [idx, sentence] of sentences.entries()) {
-							const res = await synthesizeOpenAISpeech(
-								localStorage.token,
-								$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
-									? $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice
-									: $config?.audio?.tts?.voice,
-								sentence
-							).catch((error) => {
-								toast.error(error);
-
-								speaking = null;
-								loadingSpeech = false;
-
-								return null;
-							});
-
-							if (res) {
-								const blob = await res.blob();
-								const blobUrl = URL.createObjectURL(blob);
-								const audio = new Audio(blobUrl);
-								sentencesAudio[idx] = audio;
-								loadingSpeech = false;
-								lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => playAudio(idx));
-							}
-						}
-					} else {
-						speaking = null;
-						loadingSpeech = false;
-					}
-				} else {
-					let voices = [];
-					const getVoicesLoop = setInterval(async () => {
-						voices = await speechSynthesis.getVoices();
-						if (voices.length > 0) {
-							clearInterval(getVoicesLoop);
-
-							const voice =
-								voices
-									?.filter(
-										(v) =>
-											v.voiceURI === ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
-									)
-									?.at(0) ?? undefined;
-
-							console.log(voice);
-
-							const speak = new SpeechSynthesisUtterance(message.content);
-
-							console.log(speak);
-
-							speak.onend = () => {
-								speaking = null;
-								if ($settings.conversationMode) {
-									document.getElementById('voice-input-button')?.click();
-								}
-							};
-
-							if (voice) {
-								speak.voice = voice;
-							}
-
-							speechSynthesis.speak(speak);
-						}
-					}, 100);
-				}
-			} else {
-				toast.error($i18n.t('No content to speak'));
+				speaking = false;
+				loadingSpeech = false;
+				return;
 			}
+
+			console.debug('Prepared message content for TTS', messageContentParts);
+
+			audioParts = messageContentParts.reduce(
+				(acc, _sentence, idx) => {
+					acc[idx] = null;
+					return acc;
+				},
+				{} as typeof audioParts
+			);
+
+			let lastPlayedAudioPromise = Promise.resolve(); // Initialize a promise that resolves immediately
+
+			for (const [idx, sentence] of messageContentParts.entries()) {
+				const res = await synthesizeOpenAISpeech(
+					localStorage.token,
+					$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+						? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+						: $config?.audio?.tts?.voice,
+					sentence
+				).catch((error) => {
+					console.error(error);
+					toast.error(error);
+
+					speaking = false;
+					loadingSpeech = false;
+				});
+
+				if (res) {
+					const blob = await res.blob();
+					const blobUrl = URL.createObjectURL(blob);
+					const audio = new Audio(blobUrl);
+					audioParts[idx] = audio;
+					loadingSpeech = false;
+					lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => playAudio(idx));
+				}
+			}
+		} else {
+			let voices = [];
+			const getVoicesLoop = setInterval(() => {
+				voices = speechSynthesis.getVoices();
+				if (voices.length > 0) {
+					clearInterval(getVoicesLoop);
+
+					const voice =
+						voices
+							?.filter(
+								(v) => v.voiceURI === ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+							)
+							?.at(0) ?? undefined;
+
+					console.log(voice);
+
+					const speak = new SpeechSynthesisUtterance(message.content);
+
+					console.log(speak);
+
+					speak.onend = () => {
+						speaking = false;
+						if ($settings.conversationMode) {
+							document.getElementById('voice-input-button')?.click();
+						}
+					};
+
+					if (voice) {
+						speak.voice = voice;
+					}
+
+					speechSynthesis.speak(speak);
+				}
+			}, 100);
 		}
 	};
 
@@ -330,17 +265,15 @@
 		editedContent = '';
 
 		await tick();
-		renderStyling();
 	};
 
 	const cancelEditMessage = async () => {
 		edit = false;
 		editedContent = '';
 		await tick();
-		renderStyling();
 	};
 
-	const generateImage = async (message) => {
+	const generateImage = async (message: MessageType) => {
 		generatingImage = true;
 		const res = await imageGenerations(localStorage.token, message.content).catch((error) => {
 			toast.error(error);
@@ -362,25 +295,13 @@
 	$: if (!edit) {
 		(async () => {
 			await tick();
-			renderStyling();
-
-			await mermaid.run({
-				querySelector: '.mermaid'
-			});
 		})();
 	}
 
 	onMount(async () => {
 		await tick();
-		renderStyling();
-
-		await mermaid.run({
-			querySelector: '.mermaid'
-		});
 	});
 </script>
-
-<CitationsModal bind:show={showCitationModal} citation={selectedCitation} />
 
 {#key message.id}
 	<div
@@ -399,7 +320,7 @@
 
 				{#if message.timestamp}
 					<span
-						class=" self-center invisible group-hover:visible text-gray-400 text-xs font-medium uppercase"
+						class=" self-center invisible group-hover:visible text-gray-400 text-xs font-medium uppercase ml-0.5 -mt-0.5"
 					>
 						{dayjs(message.timestamp * 1000).format($i18n.t('h:mm a'))}
 					</span>
@@ -407,7 +328,7 @@
 			</Name>
 
 			<div>
-				{#if (message?.files ?? []).filter((f) => f.type === 'image').length > 0}
+				{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
 					<div class="my-2.5 w-full flex overflow-x-auto gap-2 flex-wrap">
 						{#each message.files as file}
 							<div>
@@ -419,16 +340,14 @@
 					</div>
 				{/if}
 
-				<div
-					class="prose chat-{message.role} w-full max-w-full dark:prose-invert prose-p:my-0 prose-img:my-1 prose-headings:my-1 prose-pre:my-0 prose-table:my-0 prose-blockquote:my-0 prose-ul:-my-2 prose-ol:-my-2 prose-li:-my-3 whitespace-pre-line"
-				>
+				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
 						{#if (message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]).length > 0}
 							{@const status = (
 								message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]
 							).at(-1)}
-							<div class="flex items-center gap-2 pt-0.5 pb-1">
-								{#if status.done === false}
+							<div class="status-description flex items-center gap-2 pt-0.5 pb-1">
+								{#if status?.done === false}
 									<div class="">
 										<Spinner className="size-4" />
 									</div>
@@ -437,14 +356,22 @@
 								{#if status?.action === 'web_search' && status?.urls}
 									<WebSearchResults {status}>
 										<div class="flex flex-col justify-center -space-y-0.5">
-											<div class="text-base line-clamp-1 text-wrap">
+											<div
+												class="{status?.done === false
+													? 'shimmer'
+													: ''} text-base line-clamp-1 text-wrap"
+											>
 												{status?.description}
 											</div>
 										</div>
 									</WebSearchResults>
 								{:else}
 									<div class="flex flex-col justify-center -space-y-0.5">
-										<div class=" text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap">
+										<div
+											class="{status?.done === false
+												? 'shimmer'
+												: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
+										>
 											{status?.description}
 										</div>
 									</div>
@@ -506,82 +433,15 @@
 								{:else if message.content && message.error !== true}
 									<!-- always show message contents even if there's an error -->
 									<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
-									{#key message.id}
-										<MarkdownTokens id={message.id} {tokens} />
-									{/key}
+									<Markdown id={message.id} content={message.content} {model} />
 								{/if}
 
 								{#if message.error}
-									<div
-										class="flex mt-2 mb-4 space-x-2 border px-4 py-3 border-red-800 bg-red-800/30 font-medium rounded-lg"
-									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											fill="none"
-											viewBox="0 0 24 24"
-											stroke-width="1.5"
-											stroke="currentColor"
-											class="w-5 h-5 self-center"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-											/>
-										</svg>
-
-										<div class=" self-center">
-											{message?.error?.content ?? message.content}
-										</div>
-									</div>
+									<Error content={message?.error?.content ?? message.content} />
 								{/if}
 
 								{#if message.citations}
-									<div class="mt-1 mb-2 w-full flex gap-1 items-center flex-wrap">
-										{#each message.citations.reduce((acc, citation) => {
-											citation.document.forEach((document, index) => {
-												const metadata = citation.metadata?.[index];
-												const id = metadata?.source ?? 'N/A';
-												let source = citation?.source;
-
-												if (metadata?.name) {
-													source = { ...source, name: metadata.name };
-												}
-
-												// Check if ID looks like a URL
-												if (id.startsWith('http://') || id.startsWith('https://')) {
-													source = { name: id };
-												}
-
-												const existingSource = acc.find((item) => item.id === id);
-
-												if (existingSource) {
-													existingSource.document.push(document);
-													existingSource.metadata.push(metadata);
-												} else {
-													acc.push( { id: id, source: source, document: [document], metadata: metadata ? [metadata] : [] } );
-												}
-											});
-											return acc;
-										}, []) as citation, idx}
-											<div class="flex gap-1 text-xs font-semibold">
-												<button
-													class="flex dark:text-gray-300 py-1 px-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-xl"
-													on:click={() => {
-														showCitationModal = true;
-														selectedCitation = citation;
-													}}
-												>
-													<div class="bg-white dark:bg-gray-700 rounded-full size-4">
-														{idx + 1}
-													</div>
-													<div class="flex-1 mx-2 line-clamp-1">
-														{citation.source.name}
-													</div>
-												</button>
-											</div>
-										{/each}
-									</div>
+									<Citations citations={message.citations} />
 								{/if}
 							</div>
 						{/if}
@@ -591,7 +451,7 @@
 				{#if !edit}
 					{#if message.done || siblings.length > 1}
 						<div
-							class=" flex justify-start overflow-x-auto buttons text-gray-600 dark:text-gray-500"
+							class=" flex justify-start overflow-x-auto buttons text-gray-600 dark:text-gray-500 mt-0.5"
 						>
 							{#if siblings.length > 1}
 								<div class="flex self-center min-w-fit" dir="ltr">
@@ -649,31 +509,33 @@
 
 							{#if message.done}
 								{#if !readOnly}
-									<Tooltip content={$i18n.t('Edit')} placement="bottom">
-										<button
-											class="{isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
-											on:click={() => {
-												editMessageHandler();
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke-width="2.3"
-												stroke="currentColor"
-												class="w-4 h-4"
+									{#if $user.role === 'user' ? ($config?.permissions?.chat?.editing ?? true) : true}
+										<Tooltip content={$i18n.t('Edit')} placement="bottom">
+											<button
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+												on:click={() => {
+													editMessageHandler();
+												}}
 											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
-												/>
-											</svg>
-										</button>
-									</Tooltip>
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="2.3"
+													stroke="currentColor"
+													class="w-4 h-4"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
+													/>
+												</svg>
+											</button>
+										</Tooltip>
+									{/if}
 								{/if}
 
 								<Tooltip content={$i18n.t('Copy')} placement="bottom">
@@ -710,7 +572,7 @@
 											: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
 										on:click={() => {
 											if (!loadingSpeech) {
-												toggleSpeakMessage(message);
+												toggleSpeakMessage();
 											}
 										}}
 									>
@@ -841,113 +703,199 @@
 								{/if}
 
 								{#if message.info}
-									<Tooltip content={$i18n.t('Generation Info')} placement="bottom">
-										<button
-											class=" {isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition whitespace-pre-wrap"
-											on:click={() => {
-												console.log(message);
-											}}
-											id="info-{message.id}"
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke-width="2.3"
-												stroke="currentColor"
-												class="w-4 h-4"
+									<Tooltip
+										content={message.info.openai
+											? `prompt_tokens: ${message.info.prompt_tokens ?? 'N/A'}<br/>
+													completion_tokens: ${message.info.completion_tokens ?? 'N/A'}<br/>
+													total_tokens: ${message.info.total_tokens ?? 'N/A'}`
+											: `response_token/s: ${
+													`${
+														Math.round(
+															((message.info.eval_count ?? 0) /
+																((message.info.eval_duration ?? 0) / 1000000000)) *
+																100
+														) / 100
+													} tokens` ?? 'N/A'
+												}<br/>
+					prompt_token/s: ${
+						Math.round(
+							((message.info.prompt_eval_count ?? 0) /
+								((message.info.prompt_eval_duration ?? 0) / 1000000000)) *
+								100
+						) / 100 ?? 'N/A'
+					} tokens<br/>
+		            total_duration: ${
+									Math.round(((message.info.total_duration ?? 0) / 1000000) * 100) / 100 ?? 'N/A'
+								}ms<br/>
+		            load_duration: ${
+									Math.round(((message.info.load_duration ?? 0) / 1000000) * 100) / 100 ?? 'N/A'
+								}ms<br/>
+		            prompt_eval_count: ${message.info.prompt_eval_count ?? 'N/A'}<br/>
+		            prompt_eval_duration: ${
+									Math.round(((message.info.prompt_eval_duration ?? 0) / 1000000) * 100) / 100 ??
+									'N/A'
+								}ms<br/>
+		            eval_count: ${message.info.eval_count ?? 'N/A'}<br/>
+		            eval_duration: ${
+									Math.round(((message.info.eval_duration ?? 0) / 1000000) * 100) / 100 ?? 'N/A'
+								}ms<br/>
+		            approximate_total: ${approximateToHumanReadable(message.info.total_duration ?? 0)}`}
+										placement="top"
+									>
+										<Tooltip content={$i18n.t('Generation Info')} placement="bottom">
+											<button
+												class=" {isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition whitespace-pre-wrap"
+												on:click={() => {
+													console.log(message);
+												}}
+												id="info-{message.id}"
 											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
-												/>
-											</svg>
-										</button>
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="2.3"
+													stroke="currentColor"
+													class="w-4 h-4"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+													/>
+												</svg>
+											</button>
+										</Tooltip>
 									</Tooltip>
 								{/if}
 
 								{#if !readOnly}
-									<Tooltip content={$i18n.t('Good Response')} placement="bottom">
-										<button
-											class="{isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(message
-												?.annotation?.rating ?? null) === 1
-												? 'bg-gray-100 dark:bg-gray-800'
-												: ''} dark:hover:text-white hover:text-black transition"
-											on:click={() => {
-												rateMessage(message.id, 1);
-												showRateComment = true;
+									{#if $config?.features.enable_message_rating ?? true}
+										<Tooltip content={$i18n.t('Good Response')} placement="bottom">
+											<button
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(message
+													?.annotation?.rating ?? null) === 1
+													? 'bg-gray-100 dark:bg-gray-800'
+													: ''} dark:hover:text-white hover:text-black transition"
+												on:click={async () => {
+													await rateMessage(message.id, 1);
 
-												window.setTimeout(() => {
-													document
-														.getElementById(`message-feedback-${message.id}`)
-														?.scrollIntoView();
-												}, 0);
-											}}
-										>
-											<svg
-												stroke="currentColor"
-												fill="none"
-												stroke-width="2.3"
-												viewBox="0 0 24 24"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												class="w-4 h-4"
-												xmlns="http://www.w3.org/2000/svg"
-												><path
-													d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
-												/></svg
-											>
-										</button>
-									</Tooltip>
+													(model?.actions ?? [])
+														.filter((action) => action?.__webui__ ?? false)
+														.forEach((action) => {
+															dispatch('action', {
+																id: action.id,
+																event: {
+																	id: 'good-response',
+																	data: {
+																		messageId: message.id
+																	}
+																}
+															});
+														});
 
-									<Tooltip content={$i18n.t('Bad Response')} placement="bottom">
-										<button
-											class="{isLastMessage
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(message
-												?.annotation?.rating ?? null) === -1
-												? 'bg-gray-100 dark:bg-gray-800'
-												: ''} dark:hover:text-white hover:text-black transition"
-											on:click={() => {
-												rateMessage(message.id, -1);
-												showRateComment = true;
-												window.setTimeout(() => {
-													document
-														.getElementById(`message-feedback-${message.id}`)
-														?.scrollIntoView();
-												}, 0);
-											}}
-										>
-											<svg
-												stroke="currentColor"
-												fill="none"
-												stroke-width="2.3"
-												viewBox="0 0 24 24"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												class="w-4 h-4"
-												xmlns="http://www.w3.org/2000/svg"
-												><path
-													d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"
-												/></svg
+													showRateComment = true;
+													window.setTimeout(() => {
+														document
+															.getElementById(`message-feedback-${message.id}`)
+															?.scrollIntoView();
+													}, 0);
+												}}
 											>
-										</button>
-									</Tooltip>
+												<svg
+													stroke="currentColor"
+													fill="none"
+													stroke-width="2.3"
+													viewBox="0 0 24 24"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													class="w-4 h-4"
+													xmlns="http://www.w3.org/2000/svg"
+													><path
+														d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
+													/></svg
+												>
+											</button>
+										</Tooltip>
+
+										<Tooltip content={$i18n.t('Bad Response')} placement="bottom">
+											<button
+												class="{isLastMessage
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(message
+													?.annotation?.rating ?? null) === -1
+													? 'bg-gray-100 dark:bg-gray-800'
+													: ''} dark:hover:text-white hover:text-black transition"
+												on:click={async () => {
+													await rateMessage(message.id, -1);
+
+													(model?.actions ?? [])
+														.filter((action) => action?.__webui__ ?? false)
+														.forEach((action) => {
+															dispatch('action', {
+																id: action.id,
+																event: {
+																	id: 'bad-response',
+																	data: {
+																		messageId: message.id
+																	}
+																}
+															});
+														});
+
+													showRateComment = true;
+													window.setTimeout(() => {
+														document
+															.getElementById(`message-feedback-${message.id}`)
+															?.scrollIntoView();
+													}, 0);
+												}}
+											>
+												<svg
+													stroke="currentColor"
+													fill="none"
+													stroke-width="2.3"
+													viewBox="0 0 24 24"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													class="w-4 h-4"
+													xmlns="http://www.w3.org/2000/svg"
+													><path
+														d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"
+													/></svg
+												>
+											</button>
+										</Tooltip>
+									{/if}
 
 									{#if isLastMessage}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 											<button
 												type="button"
+												id="continue-response-button"
 												class="{isLastMessage
 													? 'visible'
 													: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
 												on:click={() => {
 													continueGeneration();
+
+													(model?.actions ?? [])
+														.filter((action) => action?.__webui__ ?? false)
+														.forEach((action) => {
+															dispatch('action', {
+																id: action.id,
+																event: {
+																	id: 'continue-response',
+																	data: {
+																		messageId: message.id
+																	}
+																}
+															});
+														});
 												}}
 											>
 												<svg
@@ -981,6 +929,20 @@
 												on:click={() => {
 													showRateComment = false;
 													regenerateResponse(message);
+
+													(model?.actions ?? [])
+														.filter((action) => action?.__webui__ ?? false)
+														.forEach((action) => {
+															dispatch('action', {
+																id: action.id,
+																event: {
+																	id: 'regenerate-response',
+																	data: {
+																		messageId: message.id
+																	}
+																}
+															});
+														});
 												}}
 											>
 												<svg
@@ -1000,7 +962,7 @@
 											</button>
 										</Tooltip>
 
-										{#each model?.actions ?? [] as action}
+										{#each (model?.actions ?? []).filter((action) => !(action?.__webui__ ?? false)) as action}
 											<Tooltip content={action.name} placement="bottom">
 												<button
 													type="button"
@@ -1037,8 +999,24 @@
 							messageId={message.id}
 							bind:show={showRateComment}
 							bind:message
-							on:submit={() => {
+							on:submit={(e) => {
 								updateChatMessages();
+
+								(model?.actions ?? [])
+									.filter((action) => action?.__webui__ ?? false)
+									.forEach((action) => {
+										dispatch('action', {
+											id: action.id,
+											event: {
+												id: 'rate-comment',
+												data: {
+													messageId: message.id,
+													comment: e.detail.comment,
+													reason: e.detail.reason
+												}
+											}
+										});
+									});
 							}}
 						/>
 					{/if}
@@ -1056,5 +1034,48 @@
 	.buttons {
 		-ms-overflow-style: none; /* IE and Edge */
 		scrollbar-width: none; /* Firefox */
+	}
+	@keyframes shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
+	}
+
+	.shimmer {
+		background: linear-gradient(90deg, #9a9b9e 25%, #2a2929 50%, #9a9b9e 75%);
+		background-size: 200% 100%;
+		background-clip: text;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		animation: shimmer 4s linear infinite;
+		color: #818286; /* Fallback color */
+	}
+
+	:global(.dark) .shimmer {
+		background: linear-gradient(90deg, #818286 25%, #eae5e5 50%, #818286 75%);
+		background-size: 200% 100%;
+		background-clip: text;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		animation: shimmer 4s linear infinite;
+		color: #a1a3a7; /* Darker fallback color for dark mode */
+	}
+
+	@keyframes smoothFadeIn {
+		0% {
+			opacity: 0;
+			transform: translateY(-10px);
+		}
+		100% {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.status-description {
+		animation: smoothFadeIn 0.2s forwards;
 	}
 </style>
