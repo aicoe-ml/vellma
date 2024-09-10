@@ -14,11 +14,6 @@ if [ "$use_gpu" = "y" ]; then
     docker_args="--gpus=all $docker_args"
 fi
 
-docker run -e LOG_LEVEL="DEBUG" \
---log-driver=awslogs \
---log-opt awslogs-region=eu-central-1 \
---log-opt awslogs-group=vellma-ollama \
---log-opt awslogs-create-group=true \
-$docker_args
+docker run $docker_args
 
 docker image prune -f
