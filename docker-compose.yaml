@@ -10,6 +10,13 @@ services:
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_KEEP_ALIVE=12h
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-central-1
+        awslogs-group: vellma
+        awslogs-stream: vellma-ollama
+        awslogs-create-group: true
 
   open-webui:
     build:
@@ -32,6 +39,13 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-central-1
+        awslogs-group: vellma
+        awslogs-stream: vellma-open-webui
+        awslogs-create-group: true
 
 volumes:
   ollama: {}
