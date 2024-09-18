@@ -1,7 +1,7 @@
 name: Vellma test workflow
 
 on:
-  repository_dispatch:
+  workflow_dispatch:
 
 jobs:
   build:
