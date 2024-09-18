@@ -1,12 +1,25 @@
-name: Vellma test workflow
+name: Vellma Reboot
 
 on:
   workflow_dispatch:
 
+env:
+  INSTANCE_ID: "i-0df33b7e4bd239f92"
+
 jobs:
-  build:
+  Reboot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Say hello
-      run: echo "Hello from API"
+    - name: Configure AWS Credentials Sandbox
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_SECRET_REGION }}
+
+    - name: Reboot Docker Container
+      run: |
+        aws ssm send-command --instance-ids "${{ env.INSTANCE_ID }}" \
+          --document-name "AWS-RunShellScript" \
+          --parameters 'commands=["touch file_from_ssm.tx"]'
