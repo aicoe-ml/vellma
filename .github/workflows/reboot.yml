@@ -5,6 +5,7 @@ on:
 
 env:
   INSTANCE_ID: "i-0df33b7e4bd239f92"
+  AWS_REGION: ${{ secrets.AWS_SECRET_REGION }}
 
 jobs:
   Reboot:
@@ -22,4 +23,4 @@ jobs:
       run: |
         aws ssm send-command --instance-ids "${{ env.INSTANCE_ID }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters 'commands=["touch file_from_ssm.tx"]'
+          --parameters 'commands=["echo Hello World"]' \
