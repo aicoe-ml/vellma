@@ -35,12 +35,10 @@
 	let assistantSpeaking = false;
 
 	let emoji = null;
-
 	let camera = false;
 	let cameraStream = null;
 
 	let chatStreaming = false;
-
 	let rmsLevel = 0;
 	let hasStartedSpeaking = false;
 	let mediaRecorder;
@@ -220,32 +218,42 @@
 	};
 
 	const startRecording = async () => {
-		if (!audioStream) {
-			audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-		}
-		mediaRecorder = new MediaRecorder(audioStream);
-
-		mediaRecorder.onstart = () => {
-			console.log('Recording started');
-			audioChunks = [];
-			analyseAudio(audioStream);
-		};
-
-		mediaRecorder.ondataavailable = (event) => {
-			if (hasStartedSpeaking) {
-				audioChunks.push(event.data);
+		if ($showCallOverlay) {
+			if (!audioStream) {
+				audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			}
-		};
+			mediaRecorder = new MediaRecorder(audioStream);
 
-		mediaRecorder.onstop = (e) => {
-			console.log('Recording stopped', audioStream, e);
-			stopRecordingCallback();
-		};
+			mediaRecorder.onstart = () => {
+				console.log('Recording started');
+				audioChunks = [];
+				analyseAudio(audioStream);
+			};
 
-		mediaRecorder.start();
+			mediaRecorder.ondataavailable = (event) => {
+				if (hasStartedSpeaking) {
+					audioChunks.push(event.data);
+				}
+			};
+
+			mediaRecorder.onstop = (e) => {
+				console.log('Recording stopped', audioStream, e);
+				stopRecordingCallback();
+			};
+
+			mediaRecorder.start();
+		}
 	};
 
 	const stopAudioStream = async () => {
+		try {
+			if (mediaRecorder) {
+				mediaRecorder.stop();
+			}
+		} catch (error) {
+			console.log('Error stopping audio stream:', error);
+		}
+
 		if (!audioStream) return;
 
 		audioStream.getAudioTracks().forEach(function (track) {
@@ -451,7 +459,9 @@
 				if ($config.audio.tts.engine !== '') {
 					const res = await synthesizeOpenAISpeech(
 						localStorage.token,
-						$settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice,
+						$settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+							? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+							: $config?.audio?.tts?.voice,
 						content
 					).catch((error) => {
 						console.error(error);
@@ -653,6 +663,16 @@
 
 		await stopRecordingCallback(false);
 		await stopCamera();
+
+		await stopAudioStream();
+		eventTarget.removeEventListener('chat:start', chatStartHandler);
+		eventTarget.removeEventListener('chat', chatEventHandler);
+		eventTarget.removeEventListener('chat:finish', chatFinishHandler);
+		audioAbortController.abort();
+
+		await tick();
+
+		await stopAllAudio();
 	});
 </script>
 
