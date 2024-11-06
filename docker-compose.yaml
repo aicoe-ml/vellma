@@ -10,13 +10,6 @@ services:
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_KEEP_ALIVE=12h
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
-    logging:
-      driver: awslogs
-      options:
-        awslogs-region: eu-central-1
-        awslogs-group: vellma
-        awslogs-stream: vellma-ollama
-        awslogs-create-group: true
 
   open-webui:
     build:
@@ -32,20 +25,22 @@ services:
       - ollama
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
+      - 80:8080
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY='
-      - 'OPENWEATHER_API_KEY=4e2e4109c93a9ef746dfd9a86ec0d3a5'  # Jess's API key
+      - 'OPENWEATHER_API_KEY=4e2e4109c93a9ef746dfd9a86ec0d3a5' # Jess's API key
+      - 'WEBUI_NAME=VeLlma'
+      - 'ENABLE_OAUTH_SIGNUP=true'
+      - 'MICROSOFT_CLIENT_ID=9f293194-28b8-44e2-8c19-11fc99dbbea4'
+      - 'MICROSOFT_CLIENT_SECRET='
+      - 'MICROSOFT_CLIENT_TENANT_ID=6415b33e-6e85-4320-be86-b155db0e12ec'
+      - 'GOOGLE_CLIENT_ID=820000357032-gv8uaqmnn4mpfvki5dvtppkbpsg2m2e3.apps.googleusercontent.com'
+      - 'GOOGLE_CLIENT_SECRET='
+      - 'OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true'
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
-    logging:
-      driver: awslogs
-      options:
-        awslogs-region: eu-central-1
-        awslogs-group: vellma
-        awslogs-stream: vellma-open-webui
-        awslogs-create-group: true
 
 volumes:
   ollama: {}
