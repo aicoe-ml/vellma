@@ -20,26 +20,70 @@ def post_webhook(url: str, message: str, event_data: dict) -> bool:
         elif "https://discord.com/api/webhooks" in url:
             payload["content"] = message
         # Microsoft Teams Webhooks
-        elif "webhook.office.com" in url:
+        elif "azure.com" in url:
             action = event_data.get("action", "undefined")
             facts = [
                 {"name": name, "value": value}
                 for name, value in json.loads(event_data.get("user", {})).items()
             ]
+
+            # we only want the user's id, name, email and role
+            facts = [
+                fact
+                for fact in facts
+                if fact["name"] in ["id", "name", "email", "role"]
+            ]
             payload = {
-                "@type": "MessageCard",
-                "@context": "http://schema.org/extensions",
-                "themeColor": "0076D7",
-                "summary": message,
-                "sections": [
+                "attachments": [
                     {
-                        "activityTitle": message,
-                        "activitySubtitle": f"{WEBUI_NAME} ({VERSION}) - {action}",
-                        "activityImage": WEBUI_FAVICON_URL,
-                        "facts": facts,
-                        "markdown": True,
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "type": "AdaptiveCard",
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "version": "1.2",
+                            "body": [
+                                {
+                                    "type": "TextBlock",
+                                    "size": "Medium",
+                                    "weight": "Bolder",
+                                    "text": message,
+                                    "wrap": True,
+                                },
+                                {
+                                    "type": "TextBlock",
+                                    "spacing": "None",
+                                    "text": f"{WEBUI_NAME} ({VERSION}) - {action}",
+                                    "isSubtle": True,
+                                    "wrap": True,
+                                },
+                                {
+                                    "type": "Image",
+                                    "url": WEBUI_FAVICON_URL,
+                                    "size": "Small",
+                                    "style": "RoundedCorners",
+                                },
+                                {
+                                    "type": "FactSet",
+                                    "facts": [
+                                        {"title": fact["name"], "value": fact["value"]}
+                                        for fact in facts
+                                    ],
+                                },
+                                {
+                                    "type": "ActionSet",
+                                    "actions": [
+                                        {
+                                            "type": "Action.OpenUrl",
+                                            "title": "Let's go!",
+                                            "url": "http://vellma.dk/admin",
+                                            "iconUrl": "icon:AddCircle",
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
                     }
-                ],
+                ]
             }
         # Default Payload
         else:
