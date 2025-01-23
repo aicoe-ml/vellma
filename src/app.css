@@ -22,6 +22,40 @@
 	font-display: swap;
 }
 
+
+/* VellivOffice Regular */
+@font-face {
+    font-family: 'VellivOffice';
+    src: url('/assets/fonts/VellivOffice-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+/* VellivOffice Bold */
+@font-face {
+    font-family: 'VellivOffice';
+    src: url('/assets/fonts/VellivOffice-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+}
+
+/* VellivOfficeAlternate Regular */
+@font-face {
+    font-family: 'VellivOfficeAlternate';
+    src: url('/assets/fonts/VellivOfficeAlternate-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+/* VellivOfficeAlternate Bold */
+@font-face {
+    font-family: 'VellivOfficeAlternate';
+    src: url('/assets/fonts/VellivOfficeAlternate-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+}
+
+
 html {
 	word-break: break-word;
 }
@@ -65,7 +99,7 @@ math {
 }
 
 .font-primary {
-	font-family: 'Archivo', sans-serif;
+	font-family: 'VellivOffice', sans-serif;
 }
 
 iframe {
