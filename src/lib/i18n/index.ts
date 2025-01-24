@@ -37,35 +37,36 @@ const createIsLoadingStore = (i18n: i18nType) => {
 	return isLoading;
 };
 
-export const initI18n = (defaultLocale: string | undefined) => {
-	let detectionOrder = defaultLocale
-		? ['querystring', 'localStorage']
-		: ['querystring', 'localStorage', 'navigator'];
-	let fallbackDefaultLocale = defaultLocale ? [defaultLocale] : ['en-US'];
+export const initI18n = () => {
+    const defaultLocale = 'da-DK'; // Danish language code
 
-	const loadResource = (language: string, namespace: string) =>
-		import(`./locales/${language}/${namespace}.json`);
+    const detectionOrder = ['querystring', 'localStorage'];
+    const fallbackDefaultLocale = [defaultLocale];
 
-	i18next
-		.use(resourcesToBackend(loadResource))
-		.use(LanguageDetector)
-		.init({
-			debug: false,
-			detection: {
-				order: detectionOrder,
-				caches: ['localStorage'],
-				lookupQuerystring: 'lang',
-				lookupLocalStorage: 'locale'
-			},
-			fallbackLng: {
-				default: fallbackDefaultLocale
-			},
-			ns: 'translation',
-			returnEmptyString: false,
-			interpolation: {
-				escapeValue: false // not needed for svelte as it escapes by default
-			}
-		});
+    const loadResource = (language: string, namespace: string) =>
+        import(`./locales/${language}/${namespace}.json`);
+
+    i18next
+        .use(resourcesToBackend(loadResource))
+        .use(LanguageDetector)
+        .init({
+            debug: false,
+            detection: {
+                order: detectionOrder,
+                caches: ['localStorage'],
+                lookupQuerystring: 'lang',
+                lookupLocalStorage: 'locale'
+            },
+            fallbackLng: {
+                default: fallbackDefaultLocale
+            },
+            lng: defaultLocale, // Set Danish as the initial language
+            ns: 'translation',
+            returnEmptyString: false,
+            interpolation: {
+                escapeValue: false // not needed for svelte as it escapes by default
+            }
+        });
 };
 
 const i18n = createI18nStore(i18next);
