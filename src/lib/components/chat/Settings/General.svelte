@@ -14,7 +14,7 @@
 	export let getModels: Function;
 
 	// General
-	let themes = ['dark', 'light', 'rose-pine dark', 'rose-pine-dawn light', 'oled-dark'];
+	let themes = ['light', 'dark'];
 	let selectedTheme = 'system';
 
 	let languages: Awaited<ReturnType<typeof getLanguages>> = [];
@@ -76,7 +76,8 @@
 	};
 
 	onMount(async () => {
-		selectedTheme = 'light'
+		selectedTheme = localStorage.theme ?? 'system';
+
 		themeChangeHandler(selectedTheme);
 
 		languages = await getLanguages();
@@ -170,7 +171,7 @@
 						placeholder="Select a theme"
 						on:change={() => themeChangeHandler(selectedTheme)}
 					>
-						<!--<option value="system">⚙️ {$i18n.t('System')}</option>-->
+						<option value="system">⚙️ {$i18n.t('System')}</option>
 						<!--<option value="oled-dark">🌃 {$i18n.t('OLED Dark')}</option>-->
 						<option value="light">☀️ {$i18n.t('Light')}</option>
 						<option value="dark">🌑 {$i18n.t('Dark')}</option>
